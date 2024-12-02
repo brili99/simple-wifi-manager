@@ -1,0 +1,7 @@
+{
+  "dependencies":
+  {
+    "bakercp/CRC32": "*",
+    "bblanchon/ArduinoJson": "*",
+  }
+}
