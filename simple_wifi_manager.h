@@ -42,6 +42,7 @@ bool save_config(Config_Wifi &config_wifi, const char *path);
 
 uint32_t calculate_crc_storage_config(Storage_Config &storage_config);
 
+extern ESP8266WebServer server;
 extern Config_Wifi config_sta;
 extern Config_Wifi config_ap;
 
