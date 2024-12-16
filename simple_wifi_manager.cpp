@@ -1,15 +1,13 @@
 #include "simple_wifi_manager.h"
 
+const char *firmware_version_;
+
 Config_Wifi config_sta;
 Config_Wifi config_ap;
 
-WiFiEventHandler wifiConnectHandler;
-WiFiEventHandler wifiDisconnectHandler;
-WiFiEventHandler wifiAPhandler;
-
 ESP8266WebServer server(80);
 
-const char *page_root PROGMEM = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>WiFi Selector</title><style>table,td,th{border:1px solid}table{border-collapse:collapse}</style></head><body><form action=\"/update_wifi\" method=\"post\"><table><tr><th colspan=\"2\">WiFi <span id=\"wifi_status\"></span></th></tr><tr><th colspan=\"2\">Set WiFi</th></tr><tr><th>SSID</th><th><input type=\"text\" name=\"ssid\" id=\"ssid\" maxlength=\"49\"></th></tr><tr><th>PASS</th><th><input type=\"text\" name=\"pass\" id=\"pass\" maxlength=\"49\"></th></tr><tr><th colspan=\"2\"><button type=\"submit\">Simpan</button></th></tr></table></form><script>function gid(e){return document.getElementById(e)}fetch(\"/status.json\").then(e=>e.json()).then(e=>{gid(\"wifi_status\").innerText=e.connected?\"Connected\":\"Disconnected\",gid(\"ssid\").value=e.ssid,gid(\"pass\").value=e.pass});</script></body></html>";
+const char *page_root PROGMEM = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>WiFi Selector</title><style>table,td,th{border:1px solid}table{border-collapse:collapse}form{margin-bottom:2rem}</style></head><body><form action=\"/update_wifi\" method=\"post\"><table><tr><th colspan=\"2\">WIFI<span id=\"wifi_status\"></span></th></tr><tr><th colspan=\"2\" id=\"ip\"></th></tr><tr><th>SSID</th><th><input type=\"text\" name=\"ssid\" id=\"ssid\" maxlength=\"49\"></th></tr><tr><th>PASS</th><th><input type=\"text\" name=\"pass\" id=\"pass\" maxlength=\"49\"></th></tr><tr><th colspan=\"2\"><button type=\"submit\">Ubah STA</button></th></tr></table></form><form action=\"/update_ap\" method=\"post\"><table><tr><th>SSID</th><th><input type=\"text\" name=\"ssid\" id=\"ap_ssid\" maxlength=\"49\"></th></tr><tr><th>PASS</th><th><input type=\"text\" name=\"pass\" id=\"ap_pass\" maxlength=\"49\"></th></tr><tr><th colspan=\"2\"><button type=\"submit\">Ubah AP</button></th></tr></table></form><form method=\"POST\" action=\"/update_firmware\" enctype=\"multipart/form-data\"><table><tr><td>Current firmware</td><td id=\"version\"></td></tr><tr><td><input type=\"file\" name=\"update\" accept=\".bin\"></td><td><button type=\"submit\" value=\"Update\">Update</button></td></tr></table></form><script>function gid(s){return document.getElementById(s)}fetch(\"/status.json\").then(s=>s.json()).then(s=>{gid(\"wifi_status\").innerText=s.connected?\" Connected\":\" Disconnected\",gid(\"ip\").innerText=s.ip,gid(\"ssid\").value=s.ssid,gid(\"pass\").value=s.pass,gid(\"version\").innerHTML=s.version,gid(\"ap_ssid\").value=s.ap_ssid,gid(\"ap_pass\").value=s.ap_pass});</script></body></html>";
 
 void wifi_manager_loop()
 {
@@ -29,10 +27,21 @@ void handle_root()
 
 void handle_get_status()
 {
+    wl_status_t wifi_status = WiFi.status();
     JsonDocument json;
-    json["connected"] = WiFi.status() == WL_CONNECTED;
+    json["connected"] = wifi_status == WL_CONNECTED;
+    json["version"] = firmware_version_;
+    IPAddress ip_addr = IPAddress(0, 0, 0, 0);
+    if (wifi_status == WL_CONNECTED)
+    {
+        ip_addr = WiFi.localIP();
+    }
+    json["ip"] = ip_addr.toString();
     json["ssid"] = config_sta.ssid;
     json["pass"] = config_sta.pass;
+
+    json["ap_ssid"] = config_ap.ssid;
+    json["ap_pass"] = config_ap.pass;
     String jsonOutput;
     serializeJson(json, jsonOutput);
     server.send(200, "application/json", jsonOutput);
@@ -49,15 +58,36 @@ void handle_update_wifi()
         strcpy(config_sta.pass, pass.c_str());
         save_config(config_sta, FS_PATH_CONFIG_STA);
     }
-    // server.sendHeader("Location", "/", true);
-    // server.send(302, "text/plain", "");
     server.send(200, "text/plain", "Saving config and restarting");
     delay(1000);
     ESP.restart();
 }
 
-void wifi_manager_setup(char *default_ap_ssid, char *default_ap_pass, char *default_sta_ssid, char *default_sta_pass)
+void handle_update_ap()
 {
+    if (server.hasArg("ssid") && server.hasArg("pass"))
+    {
+        String ssid = server.arg("ssid");
+        String pass = server.arg("pass");
+
+        strcpy(config_ap.ssid, ssid.c_str());
+        strcpy(config_ap.pass, pass.c_str());
+        save_config(config_ap, FS_PATH_CONFIG_AP);
+    }
+    server.send(200, "text/plain", "Saving config and restarting");
+    delay(1000);
+    ESP.restart();
+}
+
+void wifi_manager_setup(
+    const char *default_ap_ssid,
+    const char *default_ap_pass,
+    const char *default_sta_ssid,
+    const char *default_sta_pass,
+    const char *firmware_version,
+    const char *hostname)
+{
+    firmware_version_ = firmware_version;
     /* Setup FS */
     bool load_config_sta = false, load_config_ap = false;
     if (LittleFS.begin())
@@ -95,43 +125,63 @@ void wifi_manager_setup(char *default_ap_ssid, char *default_ap_pass, char *defa
     Serial.printf("AP\t%s\t%s\n", config_ap.ssid, config_ap.pass);
 
     /* setup wifi */
-    wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
-    wifiDisconnectHandler = WiFi.onStationModeDisconnected(onWifiDisconnect);
-    wifiAPhandler = WiFi.onSoftAPModeStationConnected(onSoftApConnected);
     WiFi.softAP(config_ap.ssid, config_ap.pass);
     WiFi.begin(config_sta.ssid, config_sta.pass);
     WiFi.setAutoConnect(true);
     WiFi.setAutoReconnect(true);
 
+    WiFi.setHostname(hostname);
+
     /* setup dns */
-    if (MDNS.begin("esp8266"))
+    if (MDNS.begin(hostname))
     {
         Serial.println("MDNS responder started");
+        MDNS.addService("http", "tcp", 80);
     }
+
+    // if (LLMNR.begin(hostname))
+    // {
+    //     Serial.println("LLMNR responder started");
+    // }
 
     /* setup webserver */
     server.on("/", handle_root);
     server.on("/status.json", handle_get_status);
     server.on("/update_wifi", handle_update_wifi);
+    server.on("/update_ap", handle_update_ap);
     server.onNotFound(handle_not_found);
+
+    server.on("/update_firmware", HTTP_POST, []()
+              {
+      server.sendHeader("Connection", "close");
+      server.send(200, "text/plain", (Update.hasError()) ? "UPDATE FAIL" : "UPDATE OK");
+      delay(1000);
+      ESP.restart(); }, []()
+              {
+      HTTPUpload& upload = server.upload();
+      if (upload.status == UPLOAD_FILE_START) {
+        Serial.setDebugOutput(true);
+        WiFiUDP::stopAll();
+        Serial.printf("Update: %s\n", upload.filename.c_str());
+        uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+        if (!Update.begin(maxSketchSpace)) { //start with max available size
+          Update.printError(Serial);
+        }
+      } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+          Update.printError(Serial);
+        }
+      } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) { //true to set the size to the current progress
+          Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+        } else {
+          Update.printError(Serial);
+        }
+        Serial.setDebugOutput(false);
+      }
+      yield(); });
+
     server.begin();
-}
-
-void onWifiConnect(const WiFiEventStationModeGotIP &event)
-{
-    Serial.printf("Connected to Wi-Fi %s\n", config_sta.ssid);
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-}
-
-void onWifiDisconnect(const WiFiEventStationModeDisconnected &event)
-{
-    Serial.println("Disconnected from Wi-Fi");
-}
-
-void onSoftApConnected(const WiFiEventSoftAPModeStationConnected &event)
-{
-    Serial.println("SoftAP connected");
 }
 
 bool get_config(Storage_Config &config, const char *path)
