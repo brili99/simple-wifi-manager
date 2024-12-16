@@ -24,11 +24,13 @@ struct Storage_Config
     uint32_t crc;
 };
 
-void wifi_manager_setup(char *default_ap_ssid, char *default_ap_pass, char *default_sta_ssid, char *default_sta_pass);
-
-void onWifiConnect(const WiFiEventStationModeGotIP &event);
-void onWifiDisconnect(const WiFiEventStationModeDisconnected &event);
-void onSoftApConnected(const WiFiEventSoftAPModeStationConnected &event);
+void wifi_manager_setup(
+    const char *default_ap_ssid,
+    const char *default_ap_pass,
+    const char *default_sta_ssid,
+    const char *default_sta_pass,
+    const char *firmware_version = "v1.0.0",
+    const char *hostname = "esp8266-wm");
 
 void wifi_manager_loop();
 
@@ -36,6 +38,7 @@ void handle_not_found();
 void handle_root();
 void handle_get_status();
 void handle_update_wifi();
+void handle_update_ap();
 
 bool get_config(Storage_Config &config, const char *path);
 bool save_config(Config_Wifi &config_wifi, const char *path);
