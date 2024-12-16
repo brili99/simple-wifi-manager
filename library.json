@@ -1,4 +1,8 @@
 {
+  "name": "simple-wifi-manager",
+  "version": "1.0.0",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif8266"],
   "dependencies": {
     "bakercp/CRC32": "*",
     "bblanchon/ArduinoJson": "*"
